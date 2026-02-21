@@ -8,7 +8,7 @@ from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClass
 # Config
 
 HIVE_TABLE = "spambase"
-OUTPUT_PATH = "hdfs:///tmp/spam_classification_output"   # HDFS path
+OUTPUT_PATH = "hdfs:///user/root/spam_classification_output"   # HDFS path
 
 # Spark Session
 spark = (
