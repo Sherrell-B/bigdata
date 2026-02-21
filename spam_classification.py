@@ -5,7 +5,6 @@ from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClass
 import happybase
 
 # Step 1: Create Spark session
-# enableHiveSupport() is kept since you are reading from a Hive table
 spark = SparkSession.builder \
     .appName("Spam Email Classification") \
     .enableHiveSupport() \
@@ -18,17 +17,24 @@ print("=" * 80)
 # Step 2: Load data from Hive
 print("\n[1] Loading data from Hive table 'spambase'...")
 spam_df = spark.sql("SELECT * FROM spambase")
+print(f"Total records: {spam_df.count()}")
 
 # Step 3: Handle null values
 print("\n[2] Cleaning data...")
+initial_count = spam_df.count()
 spam_df = spam_df.na.drop()
+final_count = spam_df.count()
+print(f"Removed {initial_count - final_count} rows with null values")
+print(f"Final dataset size: {final_count} records")
 
 # Step 4: Prepare features
 print("\n[3] Preparing features...")
 feature_columns = [col for col in spam_df.columns if col != 'class']
+print(f"Using {len(feature_columns)} features")
+
 assembler = VectorAssembler(
-    inputCols=feature_columns, 
-    outputCol="features_raw", 
+    inputCols=feature_columns,
+    outputCol="features_raw",
     handleInvalid="skip"
 )
 assembled_df = assembler.transform(spam_df)
@@ -42,11 +48,13 @@ scaled_df = scaler_model.transform(assembled_df).select("features", "class")
 # Step 6: Split data
 print("\n[5] Splitting data (70/30)...")
 train_data, test_data = scaled_df.randomSplit([0.7, 0.3], seed=42)
+print(f"Training: {train_data.count()}, Test: {test_data.count()}")
 
 # Step 7: Train model
 print("\n[6] Training Logistic Regression...")
 lr = LogisticRegression(labelCol="class", featuresCol="features", maxIter=100, regParam=0.01)
 lr_model = lr.fit(train_data)
+print("Model training completed!")
 
 # Step 8: Predictions
 print("\n[7] Making predictions...")
@@ -63,9 +71,8 @@ precision = mc_eval.evaluate(predictions, {mc_eval.metricName: "weightedPrecisio
 recall = mc_eval.evaluate(predictions, {mc_eval.metricName: "weightedRecall"})
 f1 = mc_eval.evaluate(predictions, {mc_eval.metricName: "f1"})
 
-# Print Results to Terminal
 print("\n" + "=" * 80)
-print("FINAL MODEL METRICS")
+print("RESULTS")
 print("=" * 80)
 print(f"Accuracy:  {accuracy:.4f}")
 print(f"Precision: {precision:.4f}")
@@ -74,39 +81,37 @@ print(f"F1 Score:  {f1:.4f}")
 print(f"AUC-ROC:   {auc:.4f}")
 print("=" * 80)
 
-# Step 10: Write Metrics to HBase (Directly from Driver)
-print("\n[9] Writing metrics to HBase table 'spam_metrics'...")
-try:
-    # Connect to HBase master
-    connection = happybase.Connection('master') 
+# Step 10: Save predictions to HDFS
+print("\n[9] Saving predictions to HDFS...")
+output_path = "hdfs:///tmp/spam_predictions"
+predictions.select("prediction", "class", "probability").write.mode("overwrite").csv(output_path, header=True)
+print(f"Predictions saved to: {output_path}")
+
+# Step 11: Write metrics to HBase
+print("\n[10] Writing metrics to HBase...")
+data = [
+    ('run1', 'cf:accuracy', str(accuracy)),
+    ('run1', 'cf:precision', str(precision)),
+    ('run1', 'cf:recall', str(recall)),
+    ('run1', 'cf:f1_score', str(f1)),
+    ('run1', 'cf:auc_roc', str(auc)),
+    ('run1', 'cf:model_type', 'LogisticRegression'),
+    ('run1', 'cf:train_size', str(train_data.count())),
+    ('run1', 'cf:test_size', str(test_data.count())),
+]
+
+def write_to_hbase_partition(partition):
+    connection = happybase.Connection('master')
     connection.open()
     table = connection.table('spam_metrics')
-    
-    # Using a timestamped or unique run ID is better for portfolios
-    run_id = "run_" + str(int(spark.sparkContext.startTime / 1000))
-    
-    metrics_data = {
-        b'cf:accuracy': str(accuracy).encode(),
-        b'cf:precision': str(precision).encode(),
-        b'cf:f1_score': str(f1).encode(),
-        b'cf:auc_roc': str(auc).encode(),
-        b'cf:model': b'LogisticRegression'
-    }
-    table.put(run_id.encode(), metrics_data)
+    for row in partition:
+        row_key, column, value = row
+        table.put(row_key.encode(), {column.encode(): value.encode()})
     connection.close()
-    print(f"Successfully wrote metrics to HBase with RowKey: {run_id}")
-except Exception as e:
-    print(f"HBase Write Failed: {e}")
 
-# Step 11: Save Predictions to HDFS
-# We convert to RDD to use saveAsTextFile as requested, or keep as DF for Parquet/CSV
-output_path = "hdfs:///tmp/spam_predictions_output"
-print(f"\n[10] Saving raw predictions to HDFS: {output_path}")
+rdd = spark.sparkContext.parallelize(data)
+rdd.foreachPartition(write_to_hbase_partition)
+print("Metrics successfully written to HBase!")
 
-
-# Save as text (this will save the Row objects as strings)
-predictions.rdd.saveAsTextFile(output_path)
-
-print("\nProcess Complete. Results saved to Terminal, HBase, and HDFS.")
-
+print("\n[11] Pipeline completed successfully!")
 spark.stop()
