@@ -4,38 +4,27 @@ from pyspark.ml.classification import LogisticRegression
 from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClassificationEvaluator
 import happybase
 
-# ============================================================================
-# STEP 1: Start Spark and Connect to Hive
-# ============================================================================
-print("Starting Spark session...")
+
+# Start Spark and Connect to Hive
+
 spark = SparkSession.builder \
     .appName("Spam Email Classification") \
     .enableHiveSupport() \
     .getOrCreate()
 
 print("\n" + "=" * 80)
-print("SPAM EMAIL CLASSIFICATION - Beginner Version")
 print("=" * 80)
 
-# ============================================================================
-# STEP 2: Load Data from Hive
-# ============================================================================
-print("\nLoading spam email data from Hive...")
+# Load Data from Hive
+
 data = spark.sql("SELECT * FROM spambase")
 print(f"Loaded {data.count()} emails")
 
-# ============================================================================
-# STEP 3: Clean the Data
-# ============================================================================
-print("\nCleaning data (removing empty rows)...")
+# Clean the Data
 data = data.na.drop()
 print(f"After cleaning: {data.count()} emails")
 
-# ============================================================================
-# STEP 4: Prepare Features for Machine Learning
-# ============================================================================
-print("\nPreparing features...")
-
+# Prepare Features for Machine Learning
 # Get all column names except 'class' (our target/label)
 feature_cols = [col for col in data.columns if col != 'class']
 print(f"Using {len(feature_cols)} features")
@@ -44,7 +33,7 @@ print(f"Using {len(feature_cols)} features")
 assembler = VectorAssembler(inputCols=feature_cols, outputCol="features_raw")
 data_with_features = assembler.transform(data)
 
-# Scale the features (make them similar size for better training)
+# Scale the features 
 scaler = StandardScaler(inputCol="features_raw", outputCol="features")
 scaler_model = scaler.fit(data_with_features)
 scaled_data = scaler_model.transform(data_with_features)
@@ -52,31 +41,26 @@ scaled_data = scaler_model.transform(data_with_features)
 # Keep only the columns we need
 final_data = scaled_data.select("features", "class")
 
-# ============================================================================
-# STEP 5: Split Data into Training and Testing Sets
-# ============================================================================
+# Split Data into Training and Testing Sets
+
 print("\nSplitting data into training (70%) and testing (30%)...")
 training_data, testing_data = final_data.randomSplit([0.7, 0.3], seed=42)
 print(f"Training set: {training_data.count()} emails")
 print(f"Testing set: {testing_data.count()} emails")
 
-# ============================================================================
-# STEP 6: Train the Model
-# ============================================================================
-print("\nTraining Logistic Regression model...")
+
+# Train the Model
+
 model = LogisticRegression(labelCol="class", featuresCol="features", maxIter=100)
 trained_model = model.fit(training_data)
-print("Training complete!")
 
-# ============================================================================
-# STEP 7: Test the Model (Make Predictions)
-# ============================================================================
+# Test the Model (Make Predictions)
+
 print("\nTesting the model on new data...")
 predictions = trained_model.transform(testing_data)
 
-# ============================================================================
-# STEP 8: Evaluate How Good the Model Is
-# ============================================================================
+
+# Evaluate How Good the Model Is
 print("\nCalculating accuracy scores...")
 
 # Calculate different metrics
@@ -101,9 +85,8 @@ print(f"F1 Score:  {f1:.2%}  (Balance of precision and recall)")
 print(f"AUC Score: {auc:.2%}  (Overall model quality)")
 print("=" * 80)
 
-# ============================================================================
-# STEP 9: Save Predictions to HDFS
-# ============================================================================
+# Save Predictions to HDFS
+
 print("\nSaving predictions to HDFS...")
 output_location = "hdfs:///tmp/spam_predictions"
 predictions.select("prediction", "class") \
@@ -112,10 +95,8 @@ predictions.select("prediction", "class") \
     .csv(output_location, header=True)
 print(f"Saved to: {output_location}")
 
-# ============================================================================
-# STEP 10: Save Results to HBase Database
-# ============================================================================
-print("\nSaving metrics to HBase database...")
+
+# Save Results to HBase Database
 
 # Prepare the metrics to save
 metrics_to_save = [
@@ -145,9 +126,8 @@ def save_to_hbase(partition):
 spark.sparkContext.parallelize(metrics_to_save).foreachPartition(save_to_hbase)
 print("Metrics saved to HBase!")
 
-# ============================================================================
-# STEP 11: Finish
-# ============================================================================
+# Finish
+
 print("\n" + "=" * 80)
 print("PIPELINE COMPLETED SUCCESSFULLY!")
 print("=" * 80)
