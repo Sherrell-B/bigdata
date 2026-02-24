@@ -1,3 +1,4 @@
+# Import libraries
 from pyspark.sql import SparkSession
 from pyspark.ml.feature import VectorAssembler, StandardScaler
 from pyspark.ml.classification import LogisticRegression
@@ -6,7 +7,6 @@ import happybase
 
 
 # Start Spark and Connect to Hive
-
 spark = SparkSession.builder \
     .appName("Spam Email Classification") \
     .enableHiveSupport() \
@@ -25,7 +25,7 @@ data = data.na.drop()
 print(f"After cleaning: {data.count()} emails")
 
 # Prepare Features for Machine Learning
-# Get all column names except 'class' (our target/label)
+# Get all column names except class
 feature_cols = [col for col in data.columns if col != 'class']
 print(f"Using {len(feature_cols)} features")
 
@@ -50,12 +50,10 @@ print(f"Testing set: {testing_data.count()} emails")
 
 
 # Train the Model
-
 model = LogisticRegression(labelCol="class", featuresCol="features", maxIter=100)
 trained_model = model.fit(training_data)
 
 # Test the Model (Make Predictions)
-
 print("\nTesting the model on new data...")
 predictions = trained_model.transform(testing_data)
 
@@ -70,7 +68,7 @@ precision = evaluator.evaluate(predictions, {evaluator.metricName: "weightedPrec
 recall = evaluator.evaluate(predictions, {evaluator.metricName: "weightedRecall"})
 f1 = evaluator.evaluate(predictions, {evaluator.metricName: "f1"})
 
-# Calculate AUC (Area Under Curve)
+# Calculate AUC
 auc_evaluator = BinaryClassificationEvaluator(labelCol="class")
 auc = auc_evaluator.evaluate(predictions)
 
@@ -86,7 +84,6 @@ print(f"AUC Score: {auc:.2%}  (Overall model quality)")
 print("=" * 80)
 
 # Save Predictions to HDFS
-
 print("\nSaving predictions to HDFS...")
 output_location = "hdfs:///tmp/spam_predictions"
 predictions.select("prediction", "class") \
@@ -96,9 +93,7 @@ predictions.select("prediction", "class") \
 print(f"Saved to: {output_location}")
 
 
-# Save Results to HBase Database
-
-# Prepare the metrics to save
+# Save Results to HBase Database/Prepare the metrics to save
 metrics_to_save = [
     ('run1', 'cf:accuracy', str(accuracy)),
     ('run1', 'cf:precision', str(precision)),
@@ -112,7 +107,7 @@ metrics_to_save = [
 
 # Function to write to HBase
 def save_to_hbase(partition):
-    """Save metrics to HBase database"""
+    #Save metrics to HBase database
     conn = happybase.Connection('master')
     conn.open()
     table = conn.table('spam_metrics')
@@ -127,7 +122,6 @@ spark.sparkContext.parallelize(metrics_to_save).foreachPartition(save_to_hbase)
 print("Metrics saved to HBase!")
 
 # Finish
-
 print("\n" + "=" * 80)
 print("PIPELINE COMPLETED SUCCESSFULLY!")
 print("=" * 80)
