@@ -5,7 +5,6 @@ from pyspark.ml.classification import LogisticRegression
 from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClassificationEvaluator
 import happybase
 
-
 # Start Spark and Connect to Hive
 spark = SparkSession.builder \
     .appName("Spam Email Classification") \
